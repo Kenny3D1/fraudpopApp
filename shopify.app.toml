@@ -2,7 +2,7 @@
 
 client_id = "ed21a4844465c21f055f60fe01fa1185"
 name = "testFraudDetectApp"
-application_url = "fraudpopbackend-production.up.railway.app"
+application_url = "https://fraudpopbackend-production.up.railway.app"
 embedded = true
 handle = "testfrauddetectapp-1"
 
