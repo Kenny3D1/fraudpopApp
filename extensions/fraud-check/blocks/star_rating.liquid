@@ -1,0 +1,15 @@
+{% schema %}
+{
+  "name": "FraudPop (Device Capture)",
+  "target": "body",
+  "javascript": "fraudpop.js",
+  "settings": []
+}
+{% endschema %}
+
+{%- comment -%}
+Expose capture URL pointing to the App Proxy (works across storefront pages).
+{%- endcomment -%}
+<script>
+  window.FRAUDPOP_CAPTURE_URL = '/apps/fraudpop/v1/capture';
+</script>

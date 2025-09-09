@@ -1,0 +1,40 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "ed21a4844465c21f055f60fe01fa1185"
+name = "testFraudDetectApp"
+application_url = "https://blogs-inputs-compounds-airfare.trycloudflare.com"
+embedded = true
+handle = "testfrauddetectapp-1"
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2025-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders-create"
+
+[access_scopes]
+scopes = "read_orders,write_orders,write_app_proxy"
+
+[auth]
+redirect_urls = ["https://blogs-inputs-compounds-airfare.trycloudflare.com/auth/callback", "https://blogs-inputs-compounds-airfare.trycloudflare.com/auth/shopify/callback", "https://blogs-inputs-compounds-airfare.trycloudflare.com/api/auth/callback"]
+
+[app_proxy]
+url = "https://blogs-inputs-compounds-airfare.trycloudflare.com/proxy"
+subpath = "fraudpop"
+prefix = "apps"
+
+[pos]
+embedded = false

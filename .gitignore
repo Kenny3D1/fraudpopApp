@@ -1,0 +1,69 @@
+node_modules
+.DS_Store
+/.cache
+/build
+/app/build
+/public/build/
+/public/_dev
+/app/public/build
+/prisma/dev.sqlite
+/prisma/dev.sqlite-journal
+database.sqlite
+
+.env
+.env.*
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build artifacts
+/build/
+/public/build/
+/dist/
+/.railway/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example   # keep a template checked in
+/shopify.app.toml.local
+/shopify.web.toml.local
+
+# Logs
+*.log
+logs/
+pids/
+*.pid
+*.seed
+
+# IDE / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Coverage & testing
+coverage/
+.nyc_output/
+
+# Typescript
+*.tsbuildinfo
+
+# Docker
+*.local
+.docker/
+
+# Misc
+*.swp
+
+
+
+/extensions/*/dist
+
+# Ignore shopify files created during app dev
+.shopify/*
+.shopify.lock
