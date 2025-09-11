@@ -1,177 +1,308 @@
+// app/routes/app._index.jsx
 import { json } from "@remix-run/node";
-import { useLoaderData, Link, useSearchParams } from "@remix-run/react";
+import { useLoaderData, Link as RemixLink } from "@remix-run/react";
 import {
   Page,
+  Layout,
   Card,
+  BlockStack,
+  InlineGrid,
   Text,
   Badge,
-  Pagination,
-  InlineStack,
-  BlockStack,
+  Button,
+  Banner,
   IndexTable,
   useIndexResourceState,
+  Link,
+  Box,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import { ScoreLegend } from "../components/ScoreLegend";
-import { OrderFilters } from "../components/OrderFilters";
 
-const ORDERS_QUERY = `
-  query Orders($first: Int!, $after: String) {
-    orders(first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
-      pageInfo { hasNextPage endCursor }
+const DASHBOARD_QUERY = `
+  query Dashboard($first: Int!, $queryStr: String) {
+    orders(first: $first, sortKey: CREATED_AT, reverse: true, query: $queryStr) {
       edges {
-        cursor
         node {
           id
           name
           email
-          currentTotalPriceSet { presentmentMoney { amount currencyCode } }
+          createdAt
+          currentTotalPriceSet { shopMoney { amount currencyCode } }
           metafield(namespace: "fraudpop", key: "risk") { value }
+          tags
         }
       }
+    }
+    metafieldDefinitions(first: 20, ownerType: ORDER, namespace: "fraudpop") {
+      edges { node { id key namespace } }
     }
   }
 `;
 
 export async function loader({ request }) {
-  const url = new URL(request.url);
-  const after = url.searchParams.get("after");
-  const risk = url.searchParams.get("risk");
-  const first = 25;
+  const { admin, session } = await authenticate.admin(request);
+  const shopDomain = session.shop;
 
-  const { admin } = await authenticate.admin(request);
-  const resp = await admin.graphql(ORDERS_QUERY, {
-    variables: { first, after },
+  // last 14 days
+  const since = new Date();
+  since.setDate(since.getDate() - 14);
+  const yyyy = since.getUTCFullYear();
+  const mm = String(since.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(since.getUTCDate()).padStart(2, "0");
+  const queryStr = `created_at:>=${yyyy}-${mm}-${dd}`;
+
+  const resp = await admin.graphql(DASHBOARD_QUERY, {
+    variables: { first: 50, queryStr },
   });
   const body = await resp.json();
 
-  const conn = body?.data?.orders;
-  const edges = conn?.edges || [];
+  const defs =
+    body?.data?.metafieldDefinitions?.edges?.map((e) => e.node) || [];
+  const hasRiskDefinition = !!defs.find(
+    (d) => d.key === "risk" && d.namespace === "fraudpop",
+  );
 
-  const items = edges.map(({ node }) => {
-    const total = node.currentTotalPriceSet.presentmentMoney;
-    let riskObj = {};
+  const edges = body?.data?.orders?.edges || [];
+  const orders = edges.map(({ node }) => {
+    const money = node.currentTotalPriceSet?.shopMoney;
+    let risk = { verdict: "green", reasons: [], score: 0 };
     if (node.metafield?.value) {
       try {
-        riskObj = JSON.parse(node.metafield.value);
-      } catch {}
+        const parsed = JSON.parse(node.metafield.value);
+        risk = {
+          verdict: parsed.verdict || "green",
+          reasons: parsed.reasons || [],
+          score: parsed.score || 0,
+        };
+      } catch {
+        /* ignore bad JSON */
+      }
     }
     return {
       gid: node.id,
+      id: node.id.split("/").pop(), // numeric id for deep links
       name: node.name,
       email: node.email,
-      total: `${total.amount} ${total.currencyCode}`,
-      verdict: riskObj.verdict || "green",
-      reasons: riskObj.reasons || [],
+      createdAt: node.createdAt,
+      total: money
+        ? `${Number(money.amount).toFixed(2)} ${money.currencyCode}`
+        : "—",
+      verdict: risk.verdict,
+      reasons: risk.reasons,
+      score: risk.score,
+      tags: node.tags || [],
     };
   });
 
-  const rows = risk ? items.filter((i) => i.verdict === risk) : items;
+  // KPIs
+  const kpis = orders.reduce(
+    (acc, o) => {
+      acc.total += 1;
+      if (o.verdict === "red") acc.red += 1;
+      else if (o.verdict === "amber") acc.amber += 1;
+      else acc.green += 1;
+      return acc;
+    },
+    { total: 0, red: 0, amber: 0, green: 0 },
+  );
+
+  // recent alerts (top risky)
+  const recentAlerts = orders
+    .filter((o) => o.verdict !== "green")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
 
   return json({
-    rows,
-    pageInfo: conn?.pageInfo || { hasNextPage: false, endCursor: null },
+    shopDomain,
+    hasRiskDefinition,
+    kpis,
+    recentAlerts,
   });
 }
 
-function RiskBadgeInline({ verdict }) {
+function RiskBadge({ verdict }) {
   if (verdict === "red") return <Badge tone="critical">High</Badge>;
-  if (verdict === "warn") return <Badge tone="warning">Medium</Badge>;
+  if (verdict === "amber") return <Badge tone="warning">Medium</Badge>;
   return <Badge tone="success">Low</Badge>;
 }
 
+function KpiCard({ label, value, tone }) {
+  return (
+    <Card>
+      <Box padding="400">
+        <BlockStack gap="200">
+          <Text as="h3" variant="headingSm" tone="subdued">
+            {label}
+          </Text>
+          <Text as="p" variant="heading2xl" tone={tone || undefined}>
+            {value}
+          </Text>
+        </BlockStack>
+      </Box>
+    </Card>
+  );
+}
+
 export default function AppIndex() {
-  const { rows, pageInfo } = useLoaderData();
-  const [params] = useSearchParams();
+  const { shopDomain, hasRiskDefinition, kpis, recentAlerts } = useLoaderData();
 
-  // IndexTable selection helpers (not strictly needed, but good defaults)
   const resourceName = { singular: "order", plural: "orders" };
+  const ids = recentAlerts.map((r) => r.gid);
   const { selectedResources, allResourcesSelected, handleSelectionChange } =
-    useIndexResourceState(rows.map((r) => r.gid));
+    useIndexResourceState(ids);
 
-  const nextParams = new URLSearchParams(params);
-  if (pageInfo?.endCursor) nextParams.set("after", pageInfo.endCursor);
+  const linkToTag = (label) =>
+    `https://${shopDomain}/admin/orders?query=${encodeURIComponent(
+      `tag:${label}`,
+    )}`;
+
+  const redTag = "FraudPop: Red";
+  const amberTag = "FraudPop: Amber";
+  const greenTag = "FraudPop: Green";
 
   return (
-    <Page title="FraudPop – Orders">
-      <BlockStack gap="400">
-        <Card>
-          <InlineStack
-            align="space-between"
-            blockAlign="center"
-            gap="200"
-            wrap={false}
-            style={{ padding: 16 }}
-          >
-            <Text as="h2" variant="headingMd">
-              Orders
-            </Text>
-            <ScoreLegend />
-          </InlineStack>
+    <Page
+      title="FraudPop Dashboard"
+      subtitle="Fast risk visibility at a glance"
+    >
+      <Layout>
+        {!hasRiskDefinition && (
+          <Layout.Section>
+            <Banner
+              title="Set up FraudPop risk metafield"
+              tone="warning"
+              action={{
+                content: "Open Order metafields",
+                url: `https://${shopDomain}/admin/settings/custom-data/orders`,
+                external: true,
+              }}
+            >
+              <p>
+                We couldn’t find the <code>fraudpop.risk</code> metafield
+                definition. Create it (type: <b>json</b>) and pin it to the
+                order page to see scores inline.
+              </p>
+            </Banner>
+          </Layout.Section>
+        )}
 
-          <div style={{ padding: 12 }}>
-            <OrderFilters />
-          </div>
+        <Layout.Section>
+          <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
+            <KpiCard label="Orders (14d)" value={kpis.total} />
+            <KpiCard label="High risk" value={kpis.red} tone="critical" />
+            <KpiCard label="Medium risk" value={kpis.amber} tone="warning" />
+            <KpiCard label="Low risk" value={kpis.green} tone="success" />
+          </InlineGrid>
+        </Layout.Section>
 
-          <IndexTable
-            resourceName={resourceName}
-            itemCount={rows.length}
-            selectedItemsCount={
-              allResourcesSelected ? "ALL" : selectedResources.length
-            }
-            onSelectionChange={handleSelectionChange}
-            headings={[
-              { title: "Order" },
-              { title: "Email" },
-              { title: "Total" },
-              { title: "Risk" },
-              { title: "Evidence" },
-            ]}
-          >
-            {rows.map((o, index) => (
-              <IndexTable.Row
-                id={o.gid}
-                key={o.gid}
-                selected={selectedResources.includes(o.gid)}
-                position={index}
-              >
-                <IndexTable.Cell>
-                  <Link
-                    to={`/app/orders/${encodeURIComponent(o.gid)}`}
-                    prefetch="intent"
+        <Layout.Section>
+          <Card>
+            <Box paddingInline="400" paddingBlockStart="400">
+              <BlockStack gap="200">
+                <Text as="h3" variant="headingMd">
+                  Recent alerts
+                </Text>
+                <Text tone="subdued">
+                  Highest-risk orders from the last 14 days.
+                </Text>
+              </BlockStack>
+            </Box>
+
+            <IndexTable
+              resourceName={resourceName}
+              itemCount={recentAlerts.length}
+              selectedItemsCount={
+                allResourcesSelected ? "ALL" : selectedResources.length
+              }
+              onSelectionChange={handleSelectionChange}
+              headings={[
+                { title: "Order" },
+                { title: "Email" },
+                { title: "Total" },
+                { title: "Risk" },
+                { title: "Reasons" },
+                { title: "" },
+              ]}
+            >
+              {recentAlerts.map((o, index) => (
+                <IndexTable.Row
+                  id={o.gid}
+                  key={o.gid}
+                  position={index}
+                  selected={selectedResources.includes(o.gid)}
+                >
+                  <IndexTable.Cell>
+                    {/* Deep link to native Shopify Order page */}
+                    <Link
+                      url={`https://${shopDomain}/admin/orders/${o.id}`}
+                      external
+                    >
+                      {o.name}
+                    </Link>
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>{o.email || "—"}</IndexTable.Cell>
+                  <IndexTable.Cell>{o.total}</IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <RiskBadge verdict={o.verdict} />
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    {(o.reasons || []).slice(0, 3).join(" · ") ||
+                      "No flags recorded"}
+                    {o.reasons?.length > 3 ? " …" : ""}
+                  </IndexTable.Cell>
+                  <IndexTable.Cell>
+                    <Button
+                      url={`https://${shopDomain}/admin/orders/${o.id}`}
+                      external
+                      size="slim"
+                    >
+                      Open
+                    </Button>
+                  </IndexTable.Cell>
+                </IndexTable.Row>
+              ))}
+            </IndexTable>
+          </Card>
+        </Layout.Section>
+
+        <Layout.Section>
+          <Card>
+            <Box padding="400">
+              <BlockStack gap="300">
+                <Text as="h3" variant="headingMd">
+                  Quick actions
+                </Text>
+                <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="300">
+                  <Button
+                    url="/app/settings"
+                    // stay inside app for settings
                   >
-                    {o.name}
-                  </Link>
-                </IndexTable.Cell>
-                <IndexTable.Cell>{o.email || "—"}</IndexTable.Cell>
-                <IndexTable.Cell>{o.total}</IndexTable.Cell>
-                <IndexTable.Cell>
-                  <RiskBadgeInline verdict={o.verdict} />
-                </IndexTable.Cell>
-                <IndexTable.Cell>
-                  {(o.reasons || []).join("; ") || "—"}
-                </IndexTable.Cell>
-              </IndexTable.Row>
-            ))}
-          </IndexTable>
-
-          <div style={{ padding: 12 }}>
-            <Pagination
-              hasPrevious={Boolean(params.get("after"))}
-              onPrevious={() => {
-                const sp = new URLSearchParams(params);
-                sp.delete("after");
-                window.location.search = sp.toString();
-              }}
-              hasNext={Boolean(pageInfo?.hasNextPage)}
-              onNext={() => {
-                const sp = new URLSearchParams(nextParams);
-                window.location.search = sp.toString();
-              }}
-            />
-          </div>
-        </Card>
-      </BlockStack>
+                    Open Settings
+                  </Button>
+                  <Button url={linkToTag(redTag)} external>
+                    View High risk (tag)
+                  </Button>
+                  <Button url={linkToTag(amberTag)} external>
+                    View Medium risk (tag)
+                  </Button>
+                  <Button url={linkToTag(greenTag)} external>
+                    View Low risk (tag)
+                  </Button>
+                  <Button
+                    url={`https://${shopDomain}/admin/settings/apps`}
+                    external
+                  >
+                    Manage app permissions
+                  </Button>
+                  <Button url={`https://${shopDomain}/admin/themes`} external>
+                    Verify theme extension load
+                  </Button>
+                </InlineGrid>
+              </BlockStack>
+            </Box>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }

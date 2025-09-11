@@ -1,7 +1,6 @@
 // fraudpop.js – minimal capture (App Proxy friendly)
 (function () {
   try {
-    console.log("hi");
     var sid =
       crypto && crypto.randomUUID
         ? crypto.randomUUID()
