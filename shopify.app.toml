@@ -28,7 +28,8 @@ api_version = "2025-07"
 scopes = "read_orders,write_orders,write_app_proxy"
 
 [auth]
-redirect_urls = ["https://fraudpopbackend-production.up.railway.app/auth/callback", "https://fraudpopbackend-production.up.railway.app/auth/shopify/callback", "https://fraudpopbackend-production.up.railway.app/api/auth/callback"]
+redirect_urls = ["https://fraudpopapp-production.up.railway.app/auth/callback",
+  "https://fraudpopapp-production.up.railway.app/auth/shopify/callback"]
 
 [app_proxy]
 url = "https://fraudpopbackend-production.up.railway.app"
