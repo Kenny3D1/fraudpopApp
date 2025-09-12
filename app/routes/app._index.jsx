@@ -166,26 +166,6 @@ export default function AppIndex() {
       subtitle="Fast risk visibility at a glance"
     >
       <Layout>
-        {!hasRiskDefinition && (
-          <Layout.Section>
-            <Banner
-              title="Set up FraudPop risk metafield"
-              tone="warning"
-              action={{
-                content: "Open Order metafields",
-                url: `https://${shopDomain}/admin/settings/custom-data/orders`,
-                external: true,
-              }}
-            >
-              <p>
-                We couldn’t find the <code>fraudpop.risk</code> metafield
-                definition. Create it (type: <b>json</b>) and pin it to the
-                order page to see scores inline.
-              </p>
-            </Banner>
-          </Layout.Section>
-        )}
-
         <Layout.Section>
           <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
             <KpiCard label="Orders (14d)" value={kpis.total} />
