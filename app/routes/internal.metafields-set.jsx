@@ -1,6 +1,6 @@
 // app/routes/internal.metafields-set.jsx
 import { json } from "@remix-run/node";
-import { shopify } from "~/server/shopify.server";
+import { shopify } from "../shopify.server";
 
 export const loader = () => new Response("Method Not Allowed", { status: 405 });
 
