@@ -1,43 +1,66 @@
 // app/routes/internal.metafields-set.jsx
 import { json } from "@remix-run/node";
-import { shopify } from "../shopify.server";
+import shopify from "../shopify.server";
 
-export const loader = () => new Response("Method Not Allowed", { status: 405 });
+const INTERNAL_SHARED = process.env.INTERNAL_SHARED_SECRET;
 
-export const action = async ({ request }) => {
-  if (
-    request.headers.get("x-internal-auth") !==
-    process.env.INTERNAL_SHARED_SECRET
-  ) {
-    return new Response("Forbidden", { status: 403 });
+const MUTATION = `
+mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+  metafieldsSet(metafields: $metafields) {
+    metafields { id key namespace type value owner { __typename ... on Order { id } } }
+    userErrors { field message }
   }
+}
+`;
 
-  const { shop, metafields } = await request.json();
-  if (!shop || !Array.isArray(metafields)) {
-    return new Response("Bad Request", { status: 400 });
-  }
-
-  // Load OFFLINE session and create Admin client
-  const offlineId = shopify.api.session.getOfflineId(shop);
-  const session = await shopify.sessionStorage.loadSession(offlineId);
-  if (!session) return new Response("Shop not installed", { status: 404 });
-
-  const admin = new shopify.api.clients.Graphql({ session });
-
-  const mutation = `#graphql
-    mutation SetRisk($metafields:[MetafieldsSetInput!]!) {
-      metafieldsSet(metafields:$metafields) {
-        metafields { id key namespace }
-        userErrors { field message code }
-      }
+export async function action({ request }) {
+  try {
+    if (
+      !INTERNAL_SHARED ||
+      request.headers.get("x-internal-auth") !== INTERNAL_SHARED
+    ) {
+      return json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
-  `;
 
-  const resp = await admin.request(mutation, { metafields });
-  const errors = resp?.data?.metafieldsSet?.userErrors || [];
+    const { shop, metafields } = await request.json();
+    if (!shop || !Array.isArray(metafields) || metafields.length === 0) {
+      return json({ ok: false, error: "bad_request" }, { status: 400 });
+    }
 
-  if (errors.length) {
-    return json({ ok: false, errors }, { status: 400 });
+    const offlineId = shopify.session.getOfflineId(shop);
+    const session = await shopify.sessionStorage.loadSession(offlineId);
+    if (!session) {
+      return json({ ok: false, error: "no_offline_session" }, { status: 403 });
+    }
+
+    // ✅ Correct way to make a GraphQL client
+    const client = new shopify.api.clients.Graphql({ session });
+
+    const resp = await client.request(MUTATION, { variables: { metafields } });
+    const result = resp?.data?.metafieldsSet;
+    const errors = resp?.errors;
+    const userErrors = result?.userErrors || [];
+
+    if (errors?.length)
+      return json(
+        { ok: false, error: "graphql_errors", errors },
+        { status: 502 },
+      );
+    if (userErrors.length)
+      return json(
+        { ok: false, error: "user_errors", userErrors },
+        { status: 422 },
+      );
+
+    return json({ ok: true, result }, { status: 200 });
+  } catch (e) {
+    return json(
+      { ok: false, error: "exception", message: e?.message },
+      { status: 500 },
+    );
   }
-  return json({ ok: true });
-};
+}
+
+export default function InternalMetafieldsSet() {
+  return null;
+}
