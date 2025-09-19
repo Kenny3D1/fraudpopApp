@@ -1,9 +1,11 @@
+// app/routes/api.metafields-set.jsx
 import { json } from "@remix-run/node";
 import shopify from "../shopify.server";
 
 const INTERNAL_SHARED = process.env.INTERNAL_SHARED_SECRET;
 
 export async function loader() {
+  // Never render HTML here
   return json({ ok: false, error: "method_not_allowed" }, { status: 405 });
 }
 
@@ -11,7 +13,11 @@ const MUTATION = `#graphql
 mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
   metafieldsSet(metafields: $metafields) {
     metafields {
-      id key namespace type value
+      id
+      key
+      namespace
+      type
+      value
       owner { __typename ... on Order { id } }
     }
     userErrors { field message }
@@ -20,10 +26,10 @@ mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
 `;
 
 function isShop(s) {
-  return !!s && /^[a-z0-9-]+\.myshopify\.com$/i.test(s);
+  return typeof s === "string" && /^[a-z0-9-]+\.myshopify\.com$/i.test(s);
 }
 
-export async function action(request) {
+export async function action({ request }) {
   try {
     if (
       !INTERNAL_SHARED ||
@@ -49,10 +55,10 @@ export async function action(request) {
       return json({ ok: false, error: "bad_request" }, { status: 400 });
     }
 
-    // Ensure offline session exists (so we can return a clear 403)
+    // Ensure offline session exists so unauthenticated.admin() won’t blow up
     const offlineId = shopify.session.getOfflineId(shop);
-    const offline = await shopify.sessionStorage.loadSession(offlineId);
-    if (!offline) {
+    const session = await shopify.sessionStorage.loadSession(offlineId);
+    if (!session) {
       return json({ ok: false, error: "no_offline_session" }, { status: 403 });
     }
 
@@ -75,23 +81,26 @@ export async function action(request) {
       );
     }
 
-    const errors = parsed?.errors;
-    const result = parsed?.data?.metafieldsSet;
-    const userErrors = result?.userErrors ?? [];
-
-    if (errors?.length)
+    if (parsed?.errors?.length) {
       return json(
-        { ok: false, error: "graphql_errors", errors },
+        { ok: false, error: "graphql_errors", errors: parsed.errors },
         { status: 502 },
       );
-    if (userErrors.length)
+    }
+
+    const result = parsed?.data?.metafieldsSet;
+    const userErrors = result?.userErrors || [];
+    if (userErrors.length) {
       return json(
         { ok: false, error: "user_errors", userErrors },
         { status: 422 },
       );
+    }
 
     return json({ ok: true, result }, { status: 200 });
   } catch (e) {
+    // Log server-side so Railway shows the stack
+    console.error("api.metafields-set action error", e);
     return json(
       { ok: false, error: "exception", message: e?.message },
       { status: 500 },
