@@ -4,10 +4,17 @@ import shopify from "../shopify.server";
 
 const INTERNAL_SHARED = process.env.INTERNAL_SHARED_SECRET;
 
-const MUTATION = `
+const MUTATION = `#graphql
 mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
   metafieldsSet(metafields: $metafields) {
-    metafields { id key namespace type value owner { __typename ... on Order { id } } }
+    metafields {
+      id
+      key
+      namespace
+      type
+      value
+      owner { __typename ... on Order { id } }
+    }
     userErrors { field message }
   }
 }
@@ -15,6 +22,7 @@ mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
 
 export async function action({ request }) {
   try {
+    // auth gate
     if (
       !INTERNAL_SHARED ||
       request.headers.get("x-internal-auth") !== INTERNAL_SHARED
@@ -22,35 +30,39 @@ export async function action({ request }) {
       return json({ ok: false, error: "unauthorized" }, { status: 401 });
     }
 
+    // input
     const { shop, metafields } = await request.json();
-    if (!shop || !Array.isArray(metafields) || metafields.length === 0) {
+    if (
+      typeof shop !== "string" ||
+      !Array.isArray(metafields) ||
+      metafields.length === 0
+    ) {
       return json({ ok: false, error: "bad_request" }, { status: 400 });
     }
 
-    const offlineId = shopify.session.getOfflineId(shop);
-    const session = await shopify.sessionStorage.loadSession(offlineId);
-    if (!session) {
-      return json({ ok: false, error: "no_offline_session" }, { status: 403 });
-    }
+    // ✅ Correct for background jobs in Remix: get an unauthenticated Admin context
+    const { admin } = await shopify.unauthenticated.admin(shop);
 
-    // ✅ Correct way to make a GraphQL client
-    const client = new shopify.api.clients.Graphql({ session });
+    // ✅ Call GraphQL via the admin context; this returns a Response
+    const resp = await admin.graphql(MUTATION, { variables: { metafields } });
+    const body = await resp.json();
 
-    const resp = await client.request(MUTATION, { variables: { metafields } });
-    const result = resp?.data?.metafieldsSet;
-    const errors = resp?.errors;
-    const userErrors = result?.userErrors || [];
+    const result = body?.data?.metafieldsSet;
+    const errors = body?.errors;
+    const userErrors = result?.userErrors ?? [];
 
-    if (errors?.length)
+    if (errors?.length) {
       return json(
         { ok: false, error: "graphql_errors", errors },
         { status: 502 },
       );
-    if (userErrors.length)
+    }
+    if (userErrors.length) {
       return json(
         { ok: false, error: "user_errors", userErrors },
         { status: 422 },
       );
+    }
 
     return json({ ok: true, result }, { status: 200 });
   } catch (e) {
